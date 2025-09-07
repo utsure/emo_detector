@@ -1,0 +1,2 @@
+# emo_detector
+MediaPipe
