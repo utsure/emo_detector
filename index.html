@@ -25,19 +25,47 @@
     const canvasElement = document.getElementById('output_canvas');
     const canvasCtx = canvasElement.getContext('2d');
 
-    function onResults(results) {
-      canvasCtx.save();
-      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-      if (results.multiFaceLandmarks) {
-        for (const landmarks of results.multiFaceLandmarks) {
-          drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION, {color: '#C0C0C070', lineWidth: 1});
-          drawConnectors(canvasCtx, landmarks, FACEMESH_RIGHT_EYE, {color: '#FF3030'});
-          // 他のパーツも同様に描画可能
-        }
-      }
-      canvasCtx.restore();
+    // onResults関数をまるごとこれに置き換えてください
+function onResults(results) {
+  // 元々の描画処理はそのまま
+  canvasCtx.save();
+  canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+  canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+  if (results.multiFaceLandmarks) {
+    for (const landmarks of results.multiFaceLandmarks) {
+      drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION, {color: '#C0C0C070', lineWidth: 1});
     }
+
+    // --- ここから笑顔判定のロジックを追加 ---
+    const faceLandmarks = results.multiFaceLandmarks[0];
+
+    // 口の主要な点の座標を取得
+    const leftMouth = faceLandmarks[61];  // 左口角
+    const rightMouth = faceLandmarks[291]; // 右口角
+    const topLip = faceLandmarks[13];     // 上唇の中心
+    const bottomLip = faceLandmarks[14];  // 下唇の中心
+
+    // 口の横幅と縦幅を計算
+    const mouthWidth = Math.hypot(leftMouth.x - rightMouth.x, leftMouth.y - rightMouth.y);
+    const mouthHeight = Math.hypot(topLip.x - bottomLip.x, topLip.y - bottomLip.y);
+
+    // 横幅と縦幅の比率を計算
+    const smileRatio = mouthWidth / mouthHeight;
+
+    // 結果を描画
+    canvasCtx.font = '50px Arial';
+    canvasCtx.fillStyle = 'red';
+    
+    // 比率が一定の値（例: 2.8）を超えたら「笑顔」と判定
+    if (smileRatio > 2.8) {
+        canvasCtx.fillText('Smile!', 20, 70);
+    } else {
+        canvasCtx.fillText('Neutral', 20, 70);
+    }
+    // --- 笑顔判定ロジックはここまで ---
+  }
+  canvasCtx.restore();
+}
 
     const faceMesh = new FaceMesh({locateFile: (file) => {
       // AIモデルはここから自動で読み込まれる
