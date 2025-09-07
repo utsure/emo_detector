@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html>
+<html lang="ja">
 <head>
   <meta charset="utf-8">
-  <title>MediaPipe Face Mesh</title>
+  <title>リアルタイム感情認識カメラ</title>
   <style>
-    body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+    body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #2c3e50; }
     #video-container { position: relative; }
     #output_canvas { position: absolute; top: 0; left: 0; }
   </style>
@@ -25,81 +25,94 @@
     const canvasElement = document.getElementById('output_canvas');
     const canvasCtx = canvasElement.getContext('2d');
 
-    
-    // onResults関数をまるごとこれに置き換えてください
-function onResults(results) {
-  // 元々の描画処理
-  canvasCtx.save();
-  canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-  canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-  
-  let emotion = "Neutral"; // デフォルトの感情を「無表情」に設定
-
-  if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-    const landmarks = results.multiFaceLandmarks[0];
-
-    // 元々のフェイスメッシュ描画処理
-    drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION, {color: '#C0C0C070', lineWidth: 1});
-
-    // --- ここから新しい感情判定ロジック ---
-
-    // 安定した基準値として、両目の間の距離を計算
-    const leftEye = landmarks[263];
-    const rightEye = landmarks[33];
-    const interEyeDistance = Math.hypot(leftEye.x - rightEye.x, leftEye.y - rightEye.y);
-
-    // 口の主要な点の座標を取得
-    const leftMouth = landmarks[61];  // 左口角
-    const rightMouth = landmarks[291]; // 右口角
-    const topLip = landmarks[13];     // 上唇の中心
-    const bottomLip = landmarks[14];  // 下唇の中心
-
-    // 口の横幅と縦幅を計算
-    const mouthWidth = Math.hypot(leftMouth.x - rightMouth.x, leftMouth.y - rightMouth.y);
-    const mouthHeight = Math.hypot(topLip.x - bottomLip.y, topLip.y - bottomLip.y);
-    
-    // 各パーツの大きさを基準値で割って、顔の大きさに影響されないようにする
-    const normalizedMouthHeight = mouthHeight / interEyeDistance;
-    const normalizedMouthWidth = mouthWidth / interEyeDistance;
-    
-    // 感情を判定する
-    if (normalizedMouthHeight > 0.4) {
-      emotion = "Surprised"; // 口が大きく開いていたら「驚き」
-    } else {
-      // 口角が上唇より上にあるかチェック
-      const mouthCornerY = (leftMouth.y + rightMouth.y) / 2;
-      const upperLipY = topLip.y;
+    function onResults(results) {
+      canvasCtx.save();
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
       
-      if (mouthCornerY < upperLipY && normalizedMouthWidth > 0.7) {
-        emotion = "Happy"; // 口角が上がっていて、口が横に広ければ「笑顔」
+      let emotion = "Neutral"; // デフォルトの感情
+
+      if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+        const landmarks = results.multiFaceLandmarks[0];
+        drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION, {color: '#C0C0C070', lineWidth: 1});
+
+        // --- ここから感情判定ロジック ---
+
+        // 判定の基準値（この数字を調整することで感度を変えられます）
+        const SURPRISE_THRESHOLD = 0.35;
+        const HAPPY_THRESHOLD = 0.03;
+        const SAD_THRESHOLD = 0.03;
+        const ANGRY_THRESHOLD = 0.3;
+
+        // 安定した基準値として、両目の間の距離を計算
+        const interEyeDistance = Math.hypot(landmarks[263].x - landmarks[33].x, landmarks[263].y - landmarks[33].y);
+
+        // 口の座標
+        const mouthLeft = landmarks[61];
+        const mouthRight = landmarks[291];
+        const mouthTop = landmarks[13];
+        const mouthBottom = landmarks[14];
+        const innerLipTop = landmarks[78];
+        const innerLipBottom = landmarks[308];
+
+        // 眉毛の座標
+        const eyebrowLeft = landmarks[334];
+        const eyebrowRight = landmarks[105];
+        const eyeLeft = landmarks[263];
+        const eyeRight = landmarks[33];
+
+        // 1. Surprise判定 (口が丸く大きく開いているか)
+        const mouthHeight = Math.hypot(mouthTop.x - mouthBottom.x, mouthTop.y - mouthBottom.y);
+        const mouthWidth = Math.hypot(mouthLeft.x - mouthRight.x, mouthLeft.y - mouthRight.y);
+        const normalizedMouthHeight = mouthHeight / interEyeDistance;
+        const mouthAspectRatio = mouthWidth / mouthHeight;
+        if (normalizedMouthHeight > SURPRISE_THRESHOLD && mouthAspectRatio < 1.8) {
+            emotion = "Surprise";
+        }
+        // 2. Happy判定 (歯が見えているか)
+        else {
+            const innerLipHeight = Math.hypot(innerLipTop.x - innerLipBottom.x, innerLipTop.y - innerLipBottom.y);
+            const normalizedInnerLipHeight = innerLipHeight / interEyeDistance;
+            if (normalizedInnerLipHeight > HAPPY_THRESHOLD) {
+                emotion = "Happy";
+            }
+            // 3. Sad判定 (口角が下がっているか)
+            else {
+                const mouthCornersY = (mouthLeft.y + mouthRight.y) / 2;
+                const mouthCenterY = (mouthTop.y + mouthBottom.y) / 2;
+                const mouthCornerDrop = mouthCornersY - mouthCenterY;
+                const normalizedMouthCornerDrop = mouthCornerDrop / interEyeDistance;
+                if (normalizedMouthCornerDrop > SAD_THRESHOLD) {
+                    emotion = "Sad";
+                }
+                // 4. Angry判定 (眉毛が上がっているか)
+                else {
+                    const eyebrowY = (eyebrowLeft.y + eyebrowRight.y) / 2;
+                    const eyeY = (eyeLeft.y + eyeRight.y) / 2;
+                    const eyebrowRaise = eyeY - eyebrowY; // Yは上が小さいので、この値が大きいほど眉が上
+                    const normalizedEyebrowRaise = eyebrowRaise / interEyeDistance;
+                    if (normalizedEyebrowRaise > ANGRY_THRESHOLD) {
+                        emotion = "Angry";
+                    }
+                }
+            }
+        }
+        // --- 感情判定ロジックはここまで ---
       }
+      
+      // 判定結果を描画
+      canvasCtx.font = '60px Arial';
+      canvasCtx.fillStyle = '#FF0000';
+      canvasCtx.fillText(emotion, 20, 70);
+      canvasCtx.restore();
     }
-    // --- 感情判定ロジックはここまで ---
-  }
 
-  // 判定結果を描画
-  canvasCtx.font = '50px Arial';
-  canvasCtx.fillStyle = 'red';
-  canvasCtx.fillText(emotion, 20, 70);
-
-  canvasCtx.restore();
-}
-    const faceMesh = new FaceMesh({locateFile: (file) => {
-      // AIモデルはここから自動で読み込まれる
-      return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
-    }});
-    faceMesh.setOptions({
-      maxNumFaces: 1,
-      refineLandmarks: true,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5
-    });
+    const faceMesh = new FaceMesh({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`});
+    faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
     faceMesh.onResults(onResults);
 
     const camera = new Camera(videoElement, {
-      onFrame: async () => {
-        await faceMesh.send({image: videoElement});
-      },
+      onFrame: async () => await faceMesh.send({image: videoElement}),
       width: 720,
       height: 560
     });
