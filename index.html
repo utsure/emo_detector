@@ -5,38 +5,11 @@
   <title>リアルタイム感情認識カメラ</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
-    body {
-      font-family: sans-serif;
-      margin: 0;
-      background: #2c3e50;
-      /* 縦に並べるように変更 */
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-    #info-text {
-      color: white;
-      font-size: 24px;
-      padding: 10px;
-    }
-    #video-container {
-      position: relative;
-      width: 90vw; /* 画面幅の90%を使う */
-      max-width: 720px; /* PCでの最大幅 */
-    }
-    /* 映像とキャンバスをアスペクト比16:9に保つ */
-    video, canvas {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-    }
-    #video-container::before {
-      content: '';
-      display: block;
-      padding-top: calc(560 / 720 * 100%); /* アスペクト比を維持 */
-    }
+    body { font-family: sans-serif; margin: 0; background: #2c3e50; display: flex; flex-direction: column; align-items: center; }
+    #info-text { color: white; font-size: 24px; padding: 10px; text-align: center; }
+    #video-container { position: relative; width: 90vw; max-width: 720px; }
+    video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border-radius: 10px; }
+    #video-container::before { content: ''; display: block; padding-top: calc(560 / 720 * 100%); }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
@@ -58,7 +31,11 @@
     const infoText = document.getElementById('info-text');
 
     function onResults(results) {
-      // キャンバスのサイズをビデオのサイズに合わせる
+      // 映像のサイズがまだ確定していない場合は、処理を中断する（スマホ対応の安定化処理）
+      if (!results.image || videoElement.videoWidth === 0) {
+        return;
+      }
+      
       canvasElement.width = videoElement.videoWidth;
       canvasElement.height = videoElement.videoHeight;
 
@@ -77,41 +54,32 @@
         const HAPPY_THRESHOLD = 0.06;
         const SAD_THRESHOLD = 0.025;
         const ANGRY_THRESHOLD = 0.17;
-
         const interEyeDistance = Math.hypot(landmarks[263].x - landmarks[33].x, landmarks[263].y - landmarks[33].y);
-        
         const mouthLeft = landmarks[61], mouthRight = landmarks[291];
         const mouthTop = landmarks[13], mouthBottom = landmarks[14];
         const eyebrowLeftInner = landmarks[293], eyebrowRightInner = landmarks[63];
         const noseBottom = landmarks[2];
-        
         const mouthHeight = Math.hypot(mouthTop.x - mouthBottom.x, mouthTop.y - mouthBottom.y);
         const normalizedMouthHeight = mouthHeight / interEyeDistance;
         const isSurprised = normalizedMouthHeight > SURPRISE_THRESHOLD;
-        
         const mouthCornerY = (mouthLeft.y + mouthRight.y) / 2;
         const smileIntensity = noseBottom.y - mouthCornerY;
         const normalizedSmileIntensity = smileIntensity / interEyeDistance;
         const isHappy = normalizedSmileIntensity > HAPPY_THRESHOLD;
-
         const mouthCenterY = (mouthTop.y + mouthBottom.y) / 2;
         const mouthCornerDrop = mouthCornerY - mouthCenterY;
         const normalizedMouthCornerDrop = mouthCornerDrop / interEyeDistance;
         const isSad = normalizedMouthCornerDrop > SAD_THRESHOLD;
-
         const innerEyebrowDistance = Math.hypot(eyebrowLeftInner.x - eyebrowRightInner.x, eyebrowLeftInner.y - eyebrowRightInner.y);
         const normalizedInnerEyebrowDistance = innerEyebrowDistance / interEyeDistance;
         const isAngry = normalizedInnerEyebrowDistance < ANGRY_THRESHOLD;
-
         if (isSurprised) { emotion = "Surprise"; } 
         else if (isHappy) { emotion = "Happy"; }
         else if (isSad) { emotion = "Sad"; }
         else if (isAngry) { emotion = "Angry"; }
       }
       
-      // 判定結果を上のテキストに表示
       infoText.innerText = `Emotion: ${emotion}`;
-      
       canvasCtx.restore();
     }
 
@@ -123,7 +91,6 @@
       onFrame: async () => {
         await faceMesh.send({image: videoElement});
       },
-      // スマホではwidth/heightを直接指定しない方が安定する
     });
     camera.start();
   </script>
