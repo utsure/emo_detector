@@ -36,63 +36,63 @@
         const landmarks = results.multiFaceLandmarks[0];
         drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION, {color: '#C0C0C070', lineWidth: 1});
 
-        // --- ここから感情判定ロジック ---
+        // --- 最終調整版 感情判定ロジック ---
 
         // 判定の基準値（感度調整用）
-        const SAD_TILT_THRESHOLD = 1.0;       // この値が大きいほど「下を向いている」と判定
-        const ANGRY_PUFF_THRESHOLD = 1.6;     // この値が小さいほど「頬が膨らんでいる」と判定
-        const SURPRISE_OPEN_THRESHOLD = 0.35; // 口の縦開き度合い
-        const SURPRISE_ASPECT_RATIO = 1.8;  // この値が小さいほど「口が丸い」と判定
-        const HAPPY_WIDTH_THRESHOLD = 0.75;   // 口の横幅の広がり度合い
-        const HAPPY_SMILE_THRESHOLD = 0.04;   // 口角の上がり度合い
+        const SURPRISE_THRESHOLD = 0.4;
+        const HAPPY_THRESHOLD = 0.28;
+        const SAD_THRESHOLD = 0.025;
+        const ANGRY_BROW_LOWER_THRESHOLD = 0.15;
+        const ANGRY_BROW_FURROW_THRESHOLD = 0.3;
 
         // 安定した基準値として、両目の間の距離を計算
         const interEyeDistance = Math.hypot(landmarks[263].x - landmarks[33].x, landmarks[263].y - landmarks[33].y);
 
+        // 各パーツの座標を取得
+        const mouthLeft = landmarks[61], mouthRight = landmarks[291];
+        const mouthTop = landmarks[13], mouthBottom = landmarks[14];
+        const eyebrowLeftInner = landmarks[293], eyebrowRightInner = landmarks[63];
+        const eyeLeftInner = landmarks[263], eyeRightInner = landmarks[33];
+        const eyeRightBottom = landmarks[145];
+        
         // --- 各感情の条件を計算 ---
 
-        // 悲しみ (Sad): 下を向いているか
-        const headTop = landmarks[10];
-        const noseTip = landmarks[4];
-        const headTiltDistance = noseTip.y - headTop.y;
-        const normalizedHeadTilt = headTiltDistance / interEyeDistance;
-        const isSad = normalizedHeadTilt > SAD_TILT_THRESHOLD;
-        
-        // 怒り (Angry): 頬が膨らんでいるか
-        const cheekLeft = landmarks[50];
-        const cheekRight = landmarks[280];
-        const cheekWidth = Math.hypot(cheekLeft.x - cheekRight.x, cheekLeft.y - cheekRight.y);
-        const normalizedCheekWidth = cheekWidth / interEyeDistance;
-        const isAngry = normalizedCheekWidth > ANGRY_PUFF_THRESHOLD;
-
-        // 驚き (Surprise): 口が縦に大きく、かつ丸く開いているか
-        const mouthTop = landmarks[13], mouthBottom = landmarks[14];
-        const mouthLeft = landmarks[61], mouthRight = landmarks[291];
+        // 驚き (Surprise): 口が大きく開いているか
         const mouthHeight = Math.hypot(mouthTop.x - mouthBottom.x, mouthTop.y - mouthBottom.y);
-        const mouthWidth = Math.hypot(mouthLeft.x - mouthRight.x, mouthLeft.y - mouthRight.y);
         const normalizedMouthHeight = mouthHeight / interEyeDistance;
-        const mouthAspectRatio = mouthWidth / mouthHeight;
-        const isSurprised = normalizedMouthHeight > SURPRISE_OPEN_THRESHOLD && mouthAspectRatio < SURPRISE_ASPECT_RATIO;
+        const isSurprised = normalizedMouthHeight > SURPRISE_THRESHOLD;
         
-        // 幸せ (Happy): 口角が上がり、口が横に広いか
-        const noseBottom = landmarks[2];
-        const mouthCornerY = (mouthLeft.y + mouthRight.y) / 2;
-        const smileIntensity = noseBottom.y - mouthCornerY;
-        const normalizedSmileIntensity = smileIntensity / interEyeDistance;
-        const normalizedMouthWidth = mouthWidth / interEyeDistance;
-        const isHappy = normalizedMouthWidth > HAPPY_WIDTH_THRESHOLD && normalizedSmileIntensity > HAPPY_SMILE_THRESHOLD;
+        // 幸せ (Happy): 頬が上がっているか
+        const cheekRaiseDistance = eyeRightBottom.y - mouthRight.y;
+        const normalizedCheekRaise = cheekRaiseDistance / interEyeDistance;
+        const isHappy = normalizedCheekRaise < HAPPY_THRESHOLD;
 
-        // --- 条件に基づいて最終的な感情を決定 (判定の優先順位が重要) ---
-        if (isSad) {
-            emotion = "Sad";
-        } else if (isSurprised) {
+        // 悲しみ (Sad): 口角が下がっているか
+        const mouthCenterY = (mouthTop.y + mouthBottom.y) / 2;
+        const mouthCornersY = (mouthLeft.y + mouthRight.y) / 2;
+        const mouthCornerDrop = mouthCornersY - mouthCenterY;
+        const normalizedMouthCornerDrop = mouthCornerDrop / interEyeDistance;
+        const isSad = normalizedMouthCornerDrop > SAD_THRESHOLD;
+
+        // 怒り (Angry): 眉が下がり、かつ眉間が寄っているか
+        const eyebrowLowerAmount = ((eyebrowLeftInner.y + eyebrowRightInner.y) / 2) - ((eyeLeftInner.y + eyeRightInner.y) / 2);
+        const normalizedEyebrowLower = eyebrowLowerAmount / interEyeDistance;
+        const isBrowLowered = normalizedEyebrowLower < ANGRY_BROW_LOWER_THRESHOLD;
+        const innerEyebrowDistance = Math.hypot(eyebrowLeftInner.x - eyebrowRightInner.x, eyebrowLeftInner.y - eyebrowRightInner.y);
+        const normalizedInnerEyebrowDistance = innerEyebrowDistance / interEyeDistance;
+        const isBrowFurrowed = normalizedInnerEyebrowDistance < ANGRY_BROW_FURROW_THRESHOLD;
+        const isAngry = isBrowLowered && isBrowFurrowed;
+
+        // --- 条件に基づいて最終的な感情を決定 ---
+        if (isSurprised) {
             emotion = "Surprise";
         } else if (isHappy) {
             emotion = "Happy";
+        } else if (isSad) {
+            emotion = "Sad";
         } else if (isAngry) {
             emotion = "Angry";
         }
-        // 上記のいずれでもなければ "Neutral" のまま
       }
       
       // 判定結果を描画
