@@ -20,8 +20,8 @@
 </head>
 
 <body>
-  <div id="info-text">カメラにアクセス中...</div>
-  <div id="emoji-display">🤔</div>
+  <div id="info-text">AIモデルを準備中...</div>
+  <div id="emoji-display">⏳</div>
   <div id="video-container">
     <video id="input_video" autoplay muted playsinline></video>
     <canvas id="output_canvas"></canvas>
@@ -51,12 +51,12 @@
         const landmarks = results.multiFaceLandmarks[0];
         drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION, {color: '#80DEEA', lineWidth: 1});
 
-        // --- 感情判定ロジック (最終調整版) ---
+        // --- 感情判定ロジック (最終バランス調整版) ---
         const SURPRISE_THRESHOLD = 0.4;
-        const HAPPY_THRESHOLD = 0.03;      // Happyの感度を大幅に上げる
+        const HAPPY_THRESHOLD = 0.04;
         const SAD_THRESHOLD = 0.035;
-        const ANGRY_LOWER_THRESHOLD = 0.1; // 眉の下がり具合の基準
-        const ANGRY_FURROW_THRESHOLD = 0.23; // 眉間の寄り具合の基準
+        const ANGRY_LOWER_THRESHOLD = 0.1;
+        const ANGRY_FURROW_THRESHOLD = 0.23;
 
         const interEyeDistance = Math.hypot(landmarks[263].x - landmarks[33].x, landmarks[263].y - landmarks[33].y);
         const mouthLeft = landmarks[61], mouthRight = landmarks[291], mouthTop = landmarks[13], mouthBottom = landmarks[14];
@@ -84,14 +84,14 @@
         const innerEyebrowDistance = Math.hypot(eyebrowLeftInner.x - eyebrowRightInner.x, eyebrowLeftInner.y - eyebrowRightInner.y);
         const normalizedInnerEyebrowDistance = innerEyebrowDistance / interEyeDistance;
         const isBrowFurrowed = normalizedInnerEyebrowDistance < ANGRY_FURROW_THRESHOLD;
-        const isAngry = isBrowLowered || isBrowFurrowed; // どちらかの条件を満たせばOK
+        const isAngry = isBrowLowered && isBrowFurrowed; // 「かつ」条件に戻して厳格化
 
         if (isSurprised) { emotion = "Surprise"; } 
         else if (isHappy) { emotion = "Happy"; }
         else if (isSad) { emotion = "Sad"; }
         else if (isAngry) { emotion = "Angry"; }
       }
-      infoText.innerText = `Emotion: ${emotion}`;
+      infoText.innerText = (emotion === "No Face") ? "顔を検出中..." : `Emotion: ${emotion}`;
       emojiDisplay.innerText = emotionEmojis[emotion];
       canvasCtx.restore();
     }
@@ -102,9 +102,13 @@
 
     const camera = new Camera(videoElement, {
       onFrame: async () => { await faceMesh.send({image: videoElement}); },
-      width: 640,  // ★★★ 解像度を軽量なものに変更 ★★★
-      height: 480 // ★★★ 解像度を軽量なものに変更 ★★★
+      width: 640,
+      height: 480
     });
+    
+    infoText.innerText = "カメラにアクセス中...";
+    emojiDisplay.innerText = "📷";
+    
     camera.start().catch(e => {
         console.error("Camera start failed:", e);
         infoText.innerText = "エラー: カメラ起動に失敗。許可を確認してください。";
