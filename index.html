@@ -16,35 +16,42 @@
       justify-content: flex-start; /* 上部に寄せる */
       min-height: 100vh; /* 画面いっぱいに広げる */
       overflow: hidden; /* スクロールバーが出ないように */
+      padding-bottom: 20px; /* 下部に少し余白 */
     }
 
     #info-text {
       font-size: 32px; /* 感情表示の文字を大きく */
       font-weight: bold;
-      padding: 20px 10px;
+      padding: 20px 10px 10px; /* 上の余白を多めに */
       text-align: center;
       width: 100%;
       box-sizing: border-box;
       color: #f39c12; /* オレンジ系の強調色 */
     }
 
+    #emoji-display {
+      font-size: 90px; /* 絵文字を非常に大きく */
+      text-align: center;
+      width: 100%;
+      padding: 0 10px 20px; /* 下部に余白 */
+      line-height: 1; /* 行の高さを調整 */
+    }
+
     #video-container {
       position: relative;
       width: 95vw; /* 画面幅の95%を使用 */
       max-width: 600px; /* 最大幅を設定してPCでも見やすく */
-      margin: 20px auto; /* 上下の余白と中央寄せ */
+      margin: 0 auto; /* 中央寄せ */
       border-radius: 15px; /* 角を丸く */
       overflow: hidden; /* 子要素がはみ出さないように */
       box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4); /* 影で立体感を出す */
       background-color: #34495e; /* コンテナの背景色 */
     }
 
-    /* ビデオとキャンバスの親要素にアスペクト比を維持させるハック */
     #video-container::before {
       content: '';
       display: block;
-      padding-top: calc(3 / 4 * 100%); /* 4:3のアスペクト比 (スマホカメラは4:3が多い) */
-      /* もしカメラが16:9なら padding-top: calc(9 / 16 * 100%); に変更 */
+      padding-top: calc(3 / 4 * 100%); /* 4:3のアスペクト比 */
     }
 
     video, canvas {
@@ -56,11 +63,7 @@
       object-fit: cover; /* 映像をコンテナに合わせてトリミング */
       transform: scaleX(-1); /* 左右反転 (鏡像表示) */
     }
-
-    /* MediaPipeの描画が前面にくるようにz-indexを設定 */
-    canvas {
-      z-index: 10;
-    }
+    canvas { z-index: 10; } /* MediaPipeの描画が前面にくるように */
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
@@ -69,8 +72,8 @@
 </head>
 
 <body>
-  <div id="info-text">Emotion: Neutral</div>
-  <div id="video-container">
+  <div id="info-text">カメラにアクセス中...</div>
+  <div id="emoji-display">🤔</div> <div id="video-container">
     <video id="input_video" autoplay muted playsinline></video>
     <canvas id="output_canvas"></canvas>
   </div>
@@ -80,30 +83,134 @@
     const canvasElement = document.getElementById('output_canvas');
     const canvasCtx = canvasElement.getContext('2d');
     const infoText = document.getElementById('info-text');
+    const emojiDisplay = document.getElementById('emoji-display'); // 絵文字表示用の要素
+
+    // 感情と絵文字のマッピング
+    const emotionEmojis = {
+      "Neutral": "😐",
+      "Happy": "😊",
+      "Sad": "😔",
+      "Angry": "😠",
+      "Surprise": "😮",
+      "No Face": "🤔" // 顔が検出されない場合
+    };
+
+    // Cameraクラスのインスタンスをグローバルスコープで保持
+    let cameraInstance = null;
+
+    // カメラの起動処理
+    async function startCamera() {
+      try {
+        // MediaDevices.getUserMedia() を使ってカメラに直接アクセス
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user' } // フロントカメラを優先
+        });
+        videoElement.srcObject = stream;
+
+        // videoElementがロードされた後にMediaPipeの処理を開始
+        videoElement.onloadedmetadata = () => {
+          videoElement.play();
+          infoText.innerText = "顔を検出中...";
+
+          // Cameraクラスを使ってMediaPipeと連携
+          cameraInstance = new Camera(videoElement, {
+            onFrame: async () => {
+              await faceMesh.send({image: videoElement});
+            },
+            // スマホでのパフォーマンス向上のため、ここでwidth/heightは指定しない
+          });
+          cameraInstance.start();
+        };
+
+      } catch (error) {
+        console.error("カメラの起動に失敗しました: ", error);
+        infoText.innerText = "エラー: カメラの起動に失敗しました。HTTPS接続か、カメラ許可をご確認ください。";
+        emojiDisplay.innerText = "🚫";
+      }
+    }
 
     function onResults(results) {
       // 映像のサイズがまだ確定していない、またはMediaPipeの結果がない場合は処理を中断
-      if (!results.image || videoElement.videoWidth === 0 || !results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) {
-        // 顔が検出されない場合はNeutralを表示
-        infoText.innerText = "Emotion: Neutral (顔を検出中...)";
-        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height); // 顔がない場合はメッシュも消す
-        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height); // 映像だけは表示
+      if (!results.image || videoElement.videoWidth === 0) {
         return;
       }
       
-      // キャンバスのサイズをビデオの実際の解像度に合わせる
       canvasElement.width = videoElement.videoWidth;
       canvasElement.height = videoElement.videoHeight;
 
       canvasCtx.save();
       canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-      
-      // 映像を描画 (左右反転はCSSのtransformで行うため、ここでは行わない)
       canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
       
-      let emotion = "Neutral";
-      const landmarks = results.multiFaceLandmarks[0];
+      let emotion = "No Face"; // 顔が検出されない場合のデフォルト
+
+      if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+        const landmarks = results.multiFaceLandmarks[0];
+        
+        // フェイスメッシュの描画
+        drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION, {color: '#80DEEA', lineWidth: 1});
+        drawConnectors(canvasCtx, landmarks, FACEMESH_RIGHT_EYE, {color: '#FF3B3B'});
+        drawConnectors(canvasCtx, landmarks, FACEMESH_RIGHT_EYEBROW, {color: '#FF3B3B'});
+        drawConnectors(canvasCtx, landmarks, FACEMESH_RIGHT_IRIS, {color: '#FF3B3B'});
+        drawConnectors(canvasCtx, landmarks, FACEMESH_LEFT_EYE, {color: '#30A5FF'});
+        drawConnectors(canvasCtx, landmarks, FACEMESH_LEFT_EYEBROW, {color: '#30A5FF'});
+        drawConnectors(canvasCtx, landmarks, FACEMESH_LEFT_IRIS, {color: '#30A5FF'});
+        drawConnectors(canvasCtx, landmarks, FACEMESH_FACE_OVAL, {color: '#E0E0E0', lineWidth: 2});
+        drawConnectors(canvasCtx, landmarks, FACEMESH_LIPS, {color: '#FF88DD'});
+
+        // --- 感情判定ロジック ---
+        const SURPRISE_THRESHOLD = 0.4;
+        const HAPPY_THRESHOLD = 0.06;
+        const SAD_THRESHOLD = 0.025;
+        const ANGRY_THRESHOLD = 0.17;
+        const interEyeDistance = Math.hypot(landmarks[263].x - landmarks[33].x, landmarks[263].y - landmarks[33].y);
+        const mouthLeft = landmarks[61], mouthRight = landmarks[291];
+        const mouthTop = landmarks[13], mouthBottom = landmarks[14];
+        const eyebrowLeftInner = landmarks[293], eyebrowRightInner = landmarks[63];
+        const noseBottom = landmarks[2];
+        const mouthHeight = Math.hypot(mouthTop.x - mouthBottom.x, mouthTop.y - mouthBottom.y);
+        const normalizedMouthHeight = mouthHeight / interEyeDistance;
+        const isSurprised = normalizedMouthHeight > SURPRISE_THRESHOLD;
+        const mouthCornerY = (mouthLeft.y + mouthRight.y) / 2;
+        const smileIntensity = noseBottom.y - mouthCornerY;
+        const normalizedSmileIntensity = smileIntensity / interEyeDistance;
+        const isHappy = normalizedSmileIntensity > HAPPY_THRESHOLD;
+        const mouthCenterY = (mouthTop.y + mouthBottom.y) / 2;
+        const mouthCornerDrop = mouthCornerY - mouthCenterY;
+        const normalizedMouthCornerDrop = mouthCornerDrop / interEyeDistance;
+        const isSad = normalizedMouthCornerDrop > SAD_THRESHOLD;
+        const innerEyebrowDistance = Math.hypot(eyebrowLeftInner.x - eyebrowRightInner.x, eyebrowLeftInner.y - eyebrowRightInner.y);
+        const normalizedInnerEyebrowDistance = innerEyebrowDistance / interEyeDistance;
+        const isAngry = normalizedInnerEyebrowDistance < ANGRY_THRESHOLD;
+
+        if (isSurprised) { emotion = "Surprise"; } 
+        else if (isHappy) { emotion = "Happy"; }
+        else if (isSad) { emotion = "Sad"; }
+        else if (isAngry) { emotion = "Angry"; }
+        else { emotion = "Neutral"; } // どれにも当てはまらない場合はNeutral
+      }
       
-      // フェイスメッシュの描画
-      drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION, {color: '#80DEEA', lineWidth: 1}); /* 水色系のメッシュ */
-      drawConnectors(canvasCtx, landmarks, FACEMESH_RIGHT_EYE,
+      infoText.innerText = `Emotion: ${emotion}`;
+      emojiDisplay.innerText = emotionEmojis[emotion]; // 絵文字を更新
+      canvasCtx.restore();
+    }
+
+    const faceMesh = new FaceMesh({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`});
+    faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+    faceMesh.onResults(onResults);
+
+    // ページロード時にカメラを起動
+    window.addEventListener('load', startCamera);
+
+    // ページを閉じる前にカメラを停止 (リソース解放)
+    window.addEventListener('beforeunload', () => {
+      if (cameraInstance) {
+        cameraInstance.stop();
+      }
+      if (videoElement.srcObject) {
+        videoElement.srcObject.getTracks().forEach(track => track.stop());
+      }
+    });
+  </script>
+</body>
+</html>
