@@ -39,104 +39,74 @@
     };
 
     function onResults(results) {
-      // 映像と顔のランドマークが取得できていない場合は処理を中断し、No Face表示
-      if (!results.image || videoElement.videoWidth === 0 || !results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) {
-        infoText.innerText = "顔を検出中... 🤔";
-        emojiDisplay.innerText = emotionEmojis["No Face"];
-        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height); // 顔がない場合はメッシュも消す
-        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height); // 映像だけは表示
-        return;
+      if (!results.image || videoElement.videoWidth === 0) { 
+        // 最初のフレームが来るまで待機
+        infoText.innerText = "カメラを起動中...";
+        emojiDisplay.innerText = "📷";
+        return; 
       }
-
       canvasElement.width = videoElement.videoWidth;
       canvasElement.height = videoElement.videoHeight;
       canvasCtx.save();
       canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
       canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-      
-      let emotion = "Neutral"; // 顔が検出されたらデフォルトはNeutral
-      const landmarks = results.multiFaceLandmarks[0];
-      drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION, {color: '#80DEEA', lineWidth: 1});
+      let emotion = "No Face";
+      if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+        emotion = "Neutral";
+        const landmarks = results.multiFaceLandmarks[0];
+        drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION, {color: '#80DEEA', lineWidth: 1});
 
-      // --- 感情判定ロジック (最終チューニング版) ---
-      const SURPRISE_THRESHOLD = 0.35; // スマホでの感度を上げる (口を大きく開ける動作を捉えやすく)
-      const HAPPY_THRESHOLD = 0.02;    // Happyの感度をさらに上げる
-      const SAD_THRESHOLD = 0.035;
+        // --- 感情判定ロジック (最終チューニング版) ---
+        const SURPRISE_THRESHOLD = 0.38;
+        const HAPPY_THRESHOLD = 0.02;
+        const SAD_THRESHOLD = 0.035;
+        const ANGRY_LOWER_THRESHOLD = 0.1;
+        const ANGRY_FURROW_THRESHOLD = 0.23;
+        const ANGRY_NOSE_BROW_DISTANCE_THRESHOLD = 0.45;
 
-      // Angryの新しい基準と調整
-      const ANGRY_LOWER_THRESHOLD = 0.1; // 眉の下がり具合の基準
-      const ANGRY_FURROW_THRESHOLD = 0.23; // 眉間の寄り具合の基準
-      const ANGRY_NOSE_BROW_DISTANCE_THRESHOLD = 0.45; // 眉頭と鼻先の距離がこの値以下だとAngry候補 (中央集中)
+        const interEyeDistance = Math.hypot(landmarks[263].x - landmarks[33].x, landmarks[263].y - landmarks[33].y);
+        const mouthLeft = landmarks[61], mouthRight = landmarks[291], mouthTop = landmarks[13], mouthBottom = landmarks[14];
+        const eyebrowLeftInner = landmarks[293], eyebrowRightInner = landmarks[63];
+        const eyeLeftInner = landmarks[263], eyeRightInner = landmarks[33];
+        const noseBottom = landmarks[2], noseTip = landmarks[1];
 
-      const interEyeDistance = Math.hypot(landmarks[263].x - landmarks[33].x, landmarks[263].y - landmarks[33].y);
-      const mouthLeft = landmarks[61], mouthRight = landmarks[291], mouthTop = landmarks[13], mouthBottom = landmarks[14];
-      const eyebrowLeftInner = landmarks[293], eyebrowRightInner = landmarks[63];
-      const eyeLeftInner = landmarks[263], eyeRightInner = landmarks[33];
-      const noseBottom = landmarks[2];
-      const noseTip = landmarks[1]; // 鼻の先端
+        const mouthHeight = Math.hypot(mouthTop.x - mouthBottom.x, mouthTop.y - mouthBottom.y);
+        const normalizedMouthHeight = mouthHeight / interEyeDistance;
+        const isSurprised = normalizedMouthHeight > SURPRISE_THRESHOLD;
+        
+        const mouthCornerY = (mouthLeft.y + mouthRight.y) / 2;
+        const smileIntensity = noseBottom.y - mouthCornerY;
+        const normalizedSmileIntensity = smileIntensity / interEyeDistance;
+        const isHappy = normalizedSmileIntensity > HAPPY_THRESHOLD;
 
-      // Surprise
-      const mouthHeight = Math.hypot(mouthTop.x - mouthBottom.x, mouthTop.y - mouthBottom.y);
-      const normalizedMouthHeight = mouthHeight / interEyeDistance;
-      const isSurprised = normalizedMouthHeight > SURPRISE_THRESHOLD;
-      
-      // Happy
-      const mouthCornerY = (mouthLeft.y + mouthRight.y) / 2;
-      const smileIntensity = noseBottom.y - mouthCornerY;
-      const normalizedSmileIntensity = smileIntensity / interEyeDistance;
-      const isHappy = normalizedSmileIntensity > HAPPY_THRESHOLD;
+        const mouthCenterY = (mouthTop.y + mouthBottom.y) / 2;
+        const mouthCornerDrop = mouthCornerY - mouthCenterY;
+        const normalizedMouthCornerDrop = mouthCornerDrop / interEyeDistance;
+        const isSad = normalizedMouthCornerDrop > SAD_THRESHOLD;
 
-      // Sad
-      const mouthCenterY = (mouthTop.y + mouthBottom.y) / 2;
-      const mouthCornerDrop = mouthCornerY - mouthCenterY;
-      const normalizedMouthCornerDrop = mouthCornerDrop / interEyeDistance;
-      const isSad = normalizedMouthCornerDrop > SAD_THRESHOLD;
+        const eyebrowLowerAmount = ((eyebrowLeftInner.y + eyebrowRightInner.y) / 2) - ((eyeLeftInner.y + eyeRightInner.y) / 2);
+        const normalizedEyebrowLower = eyebrowLowerAmount / interEyeDistance;
+        const isBrowLowered = normalizedEyebrowLower < ANGRY_LOWER_THRESHOLD;
+        const innerEyebrowDistance = Math.hypot(eyebrowLeftInner.x - eyebrowRightInner.x, eyebrowLeftInner.y - eyebrowRightInner.y);
+        const normalizedInnerEyebrowDistance = innerEyebrowDistance / interEyeDistance;
+        const isBrowFurrowed = normalizedInnerEyebrowDistance < ANGRY_FURROW_THRESHOLD;
+        const browNoseDistance = Math.hypot(eyebrowLeftInner.x - noseTip.x, eyebrowLeftInner.y - noseTip.y);
+        const normalizedBrowNoseDistance = browNoseDistance / interEyeDistance;
+        const isFaceCentralizedAngry = normalizedBrowNoseDistance < ANGRY_NOSE_BROW_DISTANCE_THRESHOLD;
+        const isAngry = isBrowLowered && (isBrowFurrowed || isFaceCentralizedAngry);
 
-      // Angry (組み合わせ条件)
-      const eyebrowLowerAmount = ((eyebrowLeftInner.y + eyebrowRightInner.y) / 2) - ((eyeLeftInner.y + eyeRightInner.y) / 2);
-      const normalizedEyebrowLower = eyebrowLowerAmount / interEyeDistance;
-      const isBrowLowered = normalizedEyebrowLower < ANGRY_LOWER_THRESHOLD; // 眉が十分に下がっているか
-
-      const innerEyebrowDistance = Math.hypot(eyebrowLeftInner.x - eyebrowRightInner.x, eyebrowLeftInner.y - eyebrowRightInner.y);
-      const normalizedInnerEyebrowDistance = innerEyebrowDistance / interEyeDistance;
-      const isBrowFurrowed = normalizedInnerEyebrowDistance < ANGRY_FURROW_THRESHOLD; // 眉間が十分に寄っているか
-      
-      // 新しいAngry条件: 眉頭と鼻先の距離が短くなっているか (顔が中心に集中)
-      const browNoseDistance = Math.hypot(eyebrowLeftInner.x - noseTip.x, eyebrowLeftInner.y - noseTip.y); // 左眉頭と鼻先
-      const normalizedBrowNoseDistance = browNoseDistance / interEyeDistance;
-      const isFaceCentralizedAngry = normalizedBrowNoseDistance < ANGRY_NOSE_BROW_DISTANCE_THRESHOLD;
-
-      // Angry判定: 眉が下がり、かつ(眉間が寄る または 顔が中心に集まる)
-      const isAngry = isBrowLowered && (isBrowFurrowed || isFaceCentralizedAngry);
-
-
-      // --- 条件に基づいて最終的な感情を決定 (優先度順) ---
-      if (isSurprised) { emotion = "Surprise"; } 
-      else if (isAngry) { emotion = "Angry"; } // AngryはHappyより先に判定
-      else if (isHappy) { emotion = "Happy"; }
-      else if (isSad) { emotion = "Sad"; }
-      // どれにも当てはまらない場合はNeutralがそのままemotionになる
-      
-      infoText.innerText = `Emotion: ${emotion}`;
+        if (isSurprised) { emotion = "Surprise"; } 
+        else if (isAngry) { emotion = "Angry"; }
+        else if (isHappy) { emotion = "Happy"; }
+        else if (isSad) { emotion = "Sad"; }
+      }
+      infoText.innerText = (emotion === "No Face") ? "顔を検出中..." : `Emotion: ${emotion}`;
       emojiDisplay.innerText = emotionEmojis[emotion];
       canvasCtx.restore();
     }
 
     const faceMesh = new FaceMesh({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`});
     faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5, modelComplexity: 0 });
-    
-    // AIモデルの読み込み完了を検知
-    faceMesh.onLoaded = () => {
-      console.log("MediaPipe Face Mesh model loaded.");
-      infoText.innerText = "カメラにアクセス中...";
-      emojiDisplay.innerText = "📷";
-      // モデル読み込み完了後にカメラを起動
-      camera.start().catch(e => {
-          console.error("Camera start failed:", e);
-          infoText.innerText = "エラー: カメラ起動に失敗。許可を確認してください。";
-          emojiDisplay.innerText = "🚫";
-      });
-    };
     faceMesh.onResults(onResults);
 
     const camera = new Camera(videoElement, {
@@ -144,14 +114,12 @@
       width: 640,
       height: 480
     });
-    
-    // ページロード時にモデルの読み込み開始をユーザーに通知
-    window.addEventListener('load', () => {
-        infoText.innerText = "AIモデルを準備中... ⏳";
-        emojiDisplay.innerText = "⏳";
-        // faceMesh.onLoadedがトリガーされるのを待つ
+    camera.start().catch(e => {
+        console.error("Camera start failed:", e);
+        infoText.innerText = "エラー: カメラ起動に失敗。許可を確認してください。";
+        emojiDisplay.innerText = "🚫";
     });
-
+    
     window.addEventListener('beforeunload', () => {
       camera.stop();
       if (videoElement.srcObject) { videoElement.srcObject.getTracks().forEach(track => track.stop()); }
