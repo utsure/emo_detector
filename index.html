@@ -39,9 +39,7 @@
     };
 
     function onResults(results) {
-      if (!results.image || videoElement.videoWidth === 0) {
-        return;
-      }
+      if (!results.image || videoElement.videoWidth === 0) { return; }
       canvasElement.width = videoElement.videoWidth;
       canvasElement.height = videoElement.videoHeight;
       canvasCtx.save();
@@ -52,27 +50,42 @@
         emotion = "Neutral";
         const landmarks = results.multiFaceLandmarks[0];
         drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION, {color: '#80DEEA', lineWidth: 1});
-        const SURPRISE_THRESHOLD = 0.4, HAPPY_SMILE_THRESHOLD = 0.05, HAPPY_WIDTH_THRESHOLD = 0.7, SAD_THRESHOLD = 0.035, ANGRY_THRESHOLD = 0.22;
+
+        // --- 感情判定ロジック (最終調整版) ---
+        const SURPRISE_THRESHOLD = 0.4;
+        const HAPPY_THRESHOLD = 0.03;      // Happyの感度を大幅に上げる
+        const SAD_THRESHOLD = 0.035;
+        const ANGRY_LOWER_THRESHOLD = 0.1; // 眉の下がり具合の基準
+        const ANGRY_FURROW_THRESHOLD = 0.23; // 眉間の寄り具合の基準
+
         const interEyeDistance = Math.hypot(landmarks[263].x - landmarks[33].x, landmarks[263].y - landmarks[33].y);
         const mouthLeft = landmarks[61], mouthRight = landmarks[291], mouthTop = landmarks[13], mouthBottom = landmarks[14];
         const eyebrowLeftInner = landmarks[293], eyebrowRightInner = landmarks[63];
+        const eyeLeftInner = landmarks[263], eyeRightInner = landmarks[33];
         const noseBottom = landmarks[2];
+
         const mouthHeight = Math.hypot(mouthTop.x - mouthBottom.x, mouthTop.y - mouthBottom.y);
         const normalizedMouthHeight = mouthHeight / interEyeDistance;
         const isSurprised = normalizedMouthHeight > SURPRISE_THRESHOLD;
-        const mouthWidth = Math.hypot(mouthLeft.x - mouthRight.x, mouthLeft.y - mouthRight.y);
-        const normalizedMouthWidth = mouthWidth / interEyeDistance;
+        
         const mouthCornerY = (mouthLeft.y + mouthRight.y) / 2;
         const smileIntensity = noseBottom.y - mouthCornerY;
         const normalizedSmileIntensity = smileIntensity / interEyeDistance;
-        const isHappy = normalizedSmileIntensity > HAPPY_SMILE_THRESHOLD && normalizedMouthWidth > HAPPY_WIDTH_THRESHOLD;
+        const isHappy = normalizedSmileIntensity > HAPPY_THRESHOLD;
+
         const mouthCenterY = (mouthTop.y + mouthBottom.y) / 2;
         const mouthCornerDrop = mouthCornerY - mouthCenterY;
         const normalizedMouthCornerDrop = mouthCornerDrop / interEyeDistance;
         const isSad = normalizedMouthCornerDrop > SAD_THRESHOLD;
+
+        const eyebrowLowerAmount = ((eyebrowLeftInner.y + eyebrowRightInner.y) / 2) - ((eyeLeftInner.y + eyeRightInner.y) / 2);
+        const normalizedEyebrowLower = eyebrowLowerAmount / interEyeDistance;
+        const isBrowLowered = normalizedEyebrowLower < ANGRY_LOWER_THRESHOLD;
         const innerEyebrowDistance = Math.hypot(eyebrowLeftInner.x - eyebrowRightInner.x, eyebrowLeftInner.y - eyebrowRightInner.y);
         const normalizedInnerEyebrowDistance = innerEyebrowDistance / interEyeDistance;
-        const isAngry = normalizedInnerEyebrowDistance < ANGRY_THRESHOLD;
+        const isBrowFurrowed = normalizedInnerEyebrowDistance < ANGRY_FURROW_THRESHOLD;
+        const isAngry = isBrowLowered || isBrowFurrowed; // どちらかの条件を満たせばOK
+
         if (isSurprised) { emotion = "Surprise"; } 
         else if (isHappy) { emotion = "Happy"; }
         else if (isSad) { emotion = "Sad"; }
@@ -87,23 +100,20 @@
     faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5, modelComplexity: 0 });
     faceMesh.onResults(onResults);
 
-    // ★★★ カメラ起動ロジックを改善 ★★★
     const camera = new Camera(videoElement, {
-      onFrame: async () => {
-        await faceMesh.send({image: videoElement});
-      },
-      // widthとheightを明示的に指定することで、初期化の失敗を防ぐ
-      width: 1280,
-      height: 720
+      onFrame: async () => { await faceMesh.send({image: videoElement}); },
+      width: 640,  // ★★★ 解像度を軽量なものに変更 ★★★
+      height: 480 // ★★★ 解像度を軽量なものに変更 ★★★
     });
-    camera.start();
+    camera.start().catch(e => {
+        console.error("Camera start failed:", e);
+        infoText.innerText = "エラー: カメラ起動に失敗。許可を確認してください。";
+        emojiDisplay.innerText = "🚫";
+    });
     
-    // ページを閉じる前にカメラを停止
     window.addEventListener('beforeunload', () => {
       camera.stop();
-      if (videoElement.srcObject) {
-        videoElement.srcObject.getTracks().forEach(track => track.stop());
-      }
+      if (videoElement.srcObject) { videoElement.srcObject.getTracks().forEach(track => track.stop()); }
     });
   </script>
 </body>
